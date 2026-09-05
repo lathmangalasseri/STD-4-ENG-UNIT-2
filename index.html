@@ -267,7 +267,7 @@ body{background:#fff!important}
 <div class="modal-overlay" id="rewardModal"><div class="reward-card"><div class="reward-icon">🏅</div><h2 class="reward-title">Excellent!</h2><p class="reward-subtitle">You completed this activity!</p><button class="primary-action-btn" onclick="closeRewardModal()">Continue</button></div></div>
 
 <script>
-let state={score:0,lives:5,stars:0,audioEnabled:true,activeGame:null,currentGameIndex:0,gameQueue:[],quizSubmitted:false,currentSection:null,currentLesson:null,lastChooseSection:null,visited:{}};
+let state={score:0,lives:5,stars:0,audioEnabled:true,activeGame:null,currentGameIndex:0,gameQueue:[],quizSubmitted:false,currentSection:null,currentLesson:null,lastChooseSection:null,visited:{},audioUnlocked:false};
 const LESSONS=[
 {id:'rainbow',emoji:'🌈',title:'The Rainbow People',sub:'Story about Unity'},
 {id:'ants',emoji:'🐜',title:'Ants',sub:'Poem by Gary Bryson'},
@@ -276,19 +276,209 @@ const LESSONS=[
 const SECTION_TITLES={read:'📖 Choose a Lesson to Read',learn:'🗂️ Learn Words',activities:'📝 Activities',games:'🎮 Games',quiz:'❓ Quiz',vocab:'📚 Vocabulary',wordfun:'🔤 Word Fun'};
 
 let audioCtx=null,chosenVoice=null;
-function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
-function playSound(type){if(!state.audioEnabled)return;initAudio();const osc=audioCtx.createOscillator(),gain=audioCtx.createGain();osc.connect(gain);gain.connect(audioCtx.destination);const now=audioCtx.currentTime;if(type==='correct'){osc.type='sine';osc.frequency.setValueAtTime(523.25,now);osc.frequency.exponentialRampToValueAtTime(783.99,now+.3);gain.gain.setValueAtTime(.3,now);gain.gain.exponentialRampToValueAtTime(.01,now+.4);osc.start(now);osc.stop(now+.4)}else if(type==='wrong'){osc.type='sawtooth';osc.frequency.setValueAtTime(220,now);osc.frequency.linearRampToValueAtTime(130,now+.3);gain.gain.setValueAtTime(.3,now);gain.gain.exponentialRampToValueAtTime(.01,now+.35);osc.start(now);osc.stop(now+.35)}else if(type==='click'){osc.type='triangle';osc.frequency.setValueAtTime(400,now);gain.gain.setValueAtTime(.15,now);gain.gain.exponentialRampToValueAtTime(.01,now+.08);osc.start(now);osc.stop(now+.08)}else if(type==='fanfare'){[523.25,659.25,783.99,1046.5].forEach((f,i)=>{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.connect(g);g.connect(audioCtx.destination);o.frequency.setValueAtTime(f,now+i*.12);g.gain.setValueAtTime(.2,now+i*.12);g.gain.exponentialRampToValueAtTime(.01,now+i*.12+.3);o.start(now+i*.12);o.stop(now+i*.12+.3)})}}
-function pickVoice(){if(!('speechSynthesis'in window))return null;const voices=window.speechSynthesis.getVoices();if(!voices.length)return null;chosenVoice=voices.find(v=>v.lang==='en-IN')||voices.find(v=>v.lang==='en-GB')||voices.find(v=>v.lang&&v.lang.startsWith('en'))||voices[0];return chosenVoice}
-function speakText(text,onend){if(!state.audioEnabled){if(onend)onend();return}if('speechSynthesis'in window){window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='en-IN';u.rate=.92;u.pitch=1.05;const v=chosenVoice||pickVoice();if(v)u.voice=v;if(onend)u.onend=onend;u.onerror=function(){if(onend)onend()};window.speechSynthesis.speak(u)}else if(onend)onend()}
-function toggleAudio(){state.audioEnabled=!state.audioEnabled;document.getElementById('btnAudioToggle').innerText=state.audioEnabled?'🔊':'🔇';if(!state.audioEnabled)window.speechSynthesis.cancel()}
-function toggleFullscreen(){if(!document.fullscreenElement){document.documentElement.requestFullscreen().catch(()=>{})}else if(document.exitFullscreen){document.exitFullscreen()}}
-function printPage(){playSound('click');window.print()}
-function downloadPage(){playSound('click');try{const htmlContent="<!DOCTYPE html>\n"+document.documentElement.outerHTML;const blob=new Blob([htmlContent],{type:'text/html'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='Voices_in_Unison_STD4_Unit2.html';document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(url),3000)}catch(e){alert('Download not supported. Use Print.')}}
-function updateStatsUI(){document.getElementById('valScore').innerText=state.score;document.getElementById('valLives').innerText=state.lives;document.getElementById('valStars').innerText=state.stars;document.getElementById('progressBar').style.width=Math.min(100,state.score/2.5)+'%'}
-function showRewardModal(){playSound('fanfare');document.getElementById('rewardModal').classList.add('active')}
-function closeRewardModal(){document.getElementById('rewardModal').classList.remove('active');showScreen('homeScreen')}
-function revealModel(id,btn){const el=document.getElementById(id);const showing=el.style.display==='block';el.style.display=showing?'none':'block';if(!showing){state.score+=5;updateStatsUI();if(btn)btn.innerText='🙈 Hide Answer'}else if(btn){btn.innerText='💡 Show Model Answer'}}
-function genericCheck(selClass,resultId){const sels=document.querySelectorAll('.'+selClass);let correct=0;sels.forEach(s=>{if(s.value===s.dataset.ans){s.style.borderColor='#4CAF50';correct++}else{s.style.borderColor='#F44336'}});const r=document.getElementById(resultId);r.style.color=correct===sels.length?'#2E7D32':'#C62828';r.innerText=`Score: ${correct}/${sels.length}  ${correct===sels.length?'Excellent!':'Try again!'}`;if(correct===sels.length){state.score+=15;state.stars+=1;updateStatsUI();playSound('correct')}else{playSound('wrong')}}
+
+/* ===== APP-FRIENDLY AUDIO (works inside WebView / offline apps) ===== */
+function initAudio(){
+  if(!audioCtx){
+    try{ audioCtx=new(window.AudioContext||window.webkitAudioContext)(); }
+    catch(e){ console.warn('AudioContext not available'); }
+  }
+  if(audioCtx && audioCtx.state==='suspended'){
+    audioCtx.resume().catch(()=>{});
+  }
+  return audioCtx;
+}
+
+function unlockAudio(){
+  if(state.audioUnlocked) return;
+  state.audioUnlocked=true;
+  initAudio();
+  // Warm up speechSynthesis (needed on many Android WebViews)
+  if('speechSynthesis' in window){
+    try{
+      window.speechSynthesis.getVoices();
+      const warm=new SpeechSynthesisUtterance('');
+      warm.volume=0;
+      window.speechSynthesis.speak(warm);
+      window.speechSynthesis.cancel();
+    }catch(e){}
+  }
+  // Play a silent buffer to unlock Web Audio on iOS/Android
+  if(audioCtx){
+    try{
+      const buf=audioCtx.createBuffer(1,1,22050);
+      const src=audioCtx.createBufferSource();
+      src.buffer=buf;
+      src.connect(audioCtx.destination);
+      src.start(0);
+    }catch(e){}
+  }
+}
+
+function playSound(type){
+  if(!state.audioEnabled) return;
+  unlockAudio();
+  const ctx=initAudio();
+  if(!ctx) return;
+  const now=ctx.currentTime;
+  if(type==='correct'){
+    const osc=ctx.createOscillator(),gain=ctx.createGain();
+    osc.connect(gain);gain.connect(ctx.destination);
+    osc.type='sine';
+    osc.frequency.setValueAtTime(523.25,now);
+    osc.frequency.exponentialRampToValueAtTime(783.99,now+.3);
+    gain.gain.setValueAtTime(.28,now);
+    gain.gain.exponentialRampToValueAtTime(.01,now+.4);
+    osc.start(now);osc.stop(now+.4);
+  }else if(type==='wrong'){
+    const osc=ctx.createOscillator(),gain=ctx.createGain();
+    osc.connect(gain);gain.connect(ctx.destination);
+    osc.type='sawtooth';
+    osc.frequency.setValueAtTime(220,now);
+    osc.frequency.linearRampToValueAtTime(130,now+.3);
+    gain.gain.setValueAtTime(.28,now);
+    gain.gain.exponentialRampToValueAtTime(.01,now+.35);
+    osc.start(now);osc.stop(now+.35);
+  }else if(type==='click'){
+    const osc=ctx.createOscillator(),gain=ctx.createGain();
+    osc.connect(gain);gain.connect(ctx.destination);
+    osc.type='triangle';
+    osc.frequency.setValueAtTime(420,now);
+    gain.gain.setValueAtTime(.12,now);
+    gain.gain.exponentialRampToValueAtTime(.01,now+.07);
+    osc.start(now);osc.stop(now+.07);
+  }else if(type==='fanfare'){
+    [523.25,659.25,783.99,1046.5].forEach((f,i)=>{
+      const o=ctx.createOscillator(),g=ctx.createGain();
+      o.connect(g);g.connect(ctx.destination);
+      o.type='sine';
+      o.frequency.setValueAtTime(f,now+i*.12);
+      g.gain.setValueAtTime(.18,now+i*.12);
+      g.gain.exponentialRampToValueAtTime(.01,now+i*.12+.28);
+      o.start(now+i*.12);o.stop(now+i*.12+.28);
+    });
+  }
+}
+
+function pickVoice(){
+  if(!('speechSynthesis' in window)) return null;
+  const voices=window.speechSynthesis.getVoices()||[];
+  if(!voices.length) return null;
+  // Prefer clear English voices suitable for children (Indian English first)
+  const preferred=[
+    v=>v.lang==='en-IN' && /google|microsoft|samsung|natural/i.test(v.name),
+    v=>v.lang==='en-IN',
+    v=>v.lang==='en-GB' && /google|microsoft|natural|uk/i.test(v.name),
+    v=>v.lang==='en-GB',
+    v=>v.lang==='en-US' && /google|microsoft|natural|samantha|alex/i.test(v.name),
+    v=>v.lang && v.lang.startsWith('en') && !/whisper|compact/i.test(v.name),
+    v=>v.lang && v.lang.startsWith('en')
+  ];
+  for(const test of preferred){
+    const found=voices.find(test);
+    if(found){ chosenVoice=found; return chosenVoice; }
+  }
+  chosenVoice=voices[0];
+  return chosenVoice;
+}
+
+function speakText(text,onend){
+  if(!text || !String(text).trim()){ if(onend) onend(); return; }
+  if(!state.audioEnabled){ if(onend) onend(); return; }
+  unlockAudio();
+  if(!('speechSynthesis' in window)){ if(onend) onend(); return; }
+  try{
+    window.speechSynthesis.cancel();
+    // Small delay helps some WebViews after cancel
+    setTimeout(()=>{
+      const u=new SpeechSynthesisUtterance(String(text).trim());
+      u.lang='en-IN';
+      u.rate=0.90;          // slightly slower – clear for Std 4
+      u.pitch=1.05;
+      u.volume=1;
+      const v=chosenVoice||pickVoice();
+      if(v) u.voice=v;
+      u.onend=function(){ if(onend) onend(); };
+      u.onerror=function(){ if(onend) onend(); };
+      window.speechSynthesis.speak(u);
+    },40);
+  }catch(e){
+    if(onend) onend();
+  }
+}
+
+function toggleAudio(){
+  state.audioEnabled=!state.audioEnabled;
+  document.getElementById('btnAudioToggle').innerText=state.audioEnabled?'🔊':'🔇';
+  if(!state.audioEnabled && 'speechSynthesis' in window){
+    window.speechSynthesis.cancel();
+  }
+  if(state.audioEnabled) unlockAudio();
+  playSound('click');
+}
+
+function toggleFullscreen(){
+  if(!document.fullscreenElement){
+    document.documentElement.requestFullscreen().catch(()=>{});
+  }else if(document.exitFullscreen){
+    document.exitFullscreen();
+  }
+  playSound('click');
+}
+
+function printPage(){ unlockAudio(); playSound('click'); window.print(); }
+function downloadPage(){
+  unlockAudio(); playSound('click');
+  try{
+    const htmlContent="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
+    const blob=new Blob([htmlContent],{type:'text/html'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='Voices_in_Unison_STD4_Unit2.html';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),3000);
+  }catch(e){ alert('Download not supported. Use Print.'); }
+}
+
+function updateStatsUI(){
+  document.getElementById('valScore').innerText=state.score;
+  document.getElementById('valLives').innerText=state.lives;
+  document.getElementById('valStars').innerText=state.stars;
+  document.getElementById('progressBar').style.width=Math.min(100,state.score/2.5)+'%';
+}
+
+function showRewardModal(){ playSound('fanfare'); document.getElementById('rewardModal').classList.add('active'); }
+function closeRewardModal(){ document.getElementById('rewardModal').classList.remove('active'); showScreen('homeScreen'); }
+
+function revealModel(id,btn){
+  const el=document.getElementById(id);
+  const showing=el.style.display==='block';
+  el.style.display=showing?'none':'block';
+  if(!showing){
+    state.score+=5; updateStatsUI();
+    if(btn) btn.innerText='🙈 Hide Answer';
+    playSound('click');
+  }else if(btn){
+    btn.innerText='💡 Show Model Answer';
+  }
+}
+
+function genericCheck(selClass,resultId){
+  const sels=document.querySelectorAll('.'+selClass);
+  let correct=0;
+  sels.forEach(s=>{
+    if(s.value===s.dataset.ans){ s.style.borderColor='#4CAF50'; correct++; }
+    else{ s.style.borderColor='#F44336'; }
+  });
+  const r=document.getElementById(resultId);
+  r.style.color=correct===sels.length?'#2E7D32':'#C62828';
+  r.innerText=`Score: ${correct}/${sels.length}  ${correct===sels.length?'Excellent!':'Try again!'}`;
+  if(correct===sels.length){
+    state.score+=15; state.stars+=1; updateStatsUI(); playSound('correct');
+  }else{
+    playSound('wrong');
+  }
+}
 
 const RAINBOW_STORY=['On a vast sandy land, there was a warm and peaceful village. The villagers were simple and kind-hearted. They had never met any outsiders. They enjoyed the calm and quiet life of their village.','One bright morning, the sun sprinkled its glowing golden light across the wide and clear sky. The villagers gathered in their usual spots. Some rested under the shade of tall trees. Some people sat cross-legged on the soft sand. A few children lay on the ground, sketching patterns in the sand with sticks.','Suddenly, a warm breeze swept through the village and made the air feel different and magical. Everyone looked upward. "Wow! What a beautiful sight!" Their eyes widened in wonder.','Colourful ribbons began to fall from the sky, fluttering like butterflies. Blue ribbons drifted down and red ones spun like a magical top. Yellow ribbons floated like shedding autumn leaves. Green ones fell like fresh grass.','The villagers ran and eagerly grabbed the ribbons. They tied them around themselves. The colour of the ribbons seemed to spread on their skin. Lily\'s blue ribbon made her resemble the sky. Max\'s red ribbon made him beam like the setting sun. Mia\'s green ribbon gave her the look of a lush green forest. Leo\'s yellow ribbon made him shine like the sun. They danced and played. It looked like vibrant plumes of a peacock.','But soon, a cold wind blew through the village. It started to change their appearances. "I\'m blue!" Lily cried. "I\'m red!" Max shouted. "We look so different," Leo said, frightened.','The people, separated by colours moved to different corners of the village. Max with his red ribbon told the ones who had red ribbons, "We need to stick together." Lily with her blue ribbon said, "We need to stay safe." The green and yellow groups did the same. Each built big walls around their corners.','Days passed. The red group had water, but no food. "I\'m hungry," Max complained. The blue group had food, but no water. "I\'m thirsty," Lily said. The green group had wood, but no shelter. "We\'re wet," Mia reported. The yellow group had shelter, but no firewood. "I\'m cold," Leo shivered. The cries for help sounded like a chorus.','Hearing the helpless calls, a stranger arrived. "Why are you hiding and shouting?" he asked. "We live only with those of our colour," someone replied.','They all panicked. And they hopefully looked at the shining eyes of the stranger. He smiled gently and advised, "Share what you have. You\'ll be happy." "Share?" asked the people together. "We cannot," they said firmly. The stranger smiled and said, "Sharing is the only way."','The villagers looked at each other. They thought for a while. Slowly, they began to share what they had. Then a miracle happened. Everyone got everything they needed.','Slowly, happiness began to spread in the entire village. They pulled down their walls and combined their ribbons. All the ribbons together turned into a beautiful rainbow.','The people looked at the rainbow and danced, calling themselves \'The Rainbow People\'. The rainbow ribbon became a symbol of their newly found unity and joy. The warm breeze returned and The Rainbow People felt happy. They lived together in harmony.'];
 const ANTS_POEM=['Such a little thing we call the ant,','It seems he has no word for "can\'t".','They\'ll climb up over, around, and through,','It seems there is nothing ants can\'t do.','They never quit, they never stay,','They always find another way','To get to where they need to go;','I wonder how they seem to know.','This bug so small, this tiny speck,','Can teach us all how to earn respect.'];
@@ -325,9 +515,44 @@ function renderContentFor(section,lessonId){const L=LESSONS.find(x=>x.id===lesso
 
 function renderRead(body,lessonId){let lines=[],qa=[],title='';if(lessonId==='rainbow'){lines=RAINBOW_STORY;qa=RAINBOW_QA;title='🌈 The Rainbow People'}else if(lessonId==='ants'){lines=ANTS_POEM;qa=ANTS_QA;title='🐜 Ants'}else{lines=KITE_STORY;qa=KITE_QA;title='🪁 Who Flies the Kite?'}
 body.innerHTML=`<div class="story-title-wrap"><span class="story-title">${title}</span></div><button class="read-all-btn" id="readAllBtn">🔊 Read All / Stop</button><div id="storyParas"></div><div class="activity-block" style="margin-top:20px"><div class="activity-heading">🔎 Let's Explore</div><div id="qaBox"></div></div>`;
-const paras=document.getElementById('storyParas');lines.forEach(line=>{const div=document.createElement('div');div.className='story-para';div.innerHTML=`<p>${line}</p><button class="mini-play" onclick="speakText(this.dataset.t)" data-t="${line.replace(/"/g,'&quot;')}">🔊</button>`;paras.appendChild(div)});
-const qaBox=document.getElementById('qaBox');qa.forEach((item,i)=>{const el=document.createElement('div');el.className='qa-line';el.innerHTML=`<div class="q">${i+1}. ${item[0]}</div><div class="a" id="qa${i}">${item[1]}</div><button class="reveal-btn" onclick="document.getElementById('qa${i}').classList.toggle('show')">💡 Show Answer</button>`;qaBox.appendChild(el)});
-let reading=false;document.getElementById('readAllBtn').onclick=function(){if(reading){window.speechSynthesis.cancel();reading=false;return}reading=true;let i=0;function next(){if(i>=lines.length||!reading){reading=false;return}speakText(lines[i],()=>{i++;next()})}next()}}
+const paras=document.getElementById('storyParas');
+lines.forEach(line=>{
+  const div=document.createElement('div');
+  div.className='story-para';
+  div.innerHTML=`<p>${line}</p><button class="mini-play" onclick="playSound('click');speakText(this.dataset.t)" data-t="${line.replace(/"/g,'&quot;')}">🔊</button>`;
+  paras.appendChild(div);
+});
+const qaBox=document.getElementById('qaBox');
+qa.forEach((item,i)=>{
+  const el=document.createElement('div');
+  el.className='qa-line';
+  el.innerHTML=`<div class="q">${i+1}. ${item[0]}</div>
+    <div class="a" id="qa${i}">${item[1]}</div>
+    <button class="reveal-btn" onclick="toggleQAAnswer(${i},this)">💡 Show Answer</button>
+    <button class="mini-play" style="margin-left:6px;width:36px;height:36px;font-size:.95rem" onclick="speakText(this.dataset.t)" data-t="${item[0].replace(/"/g,'&quot;')}">🔊</button>`;
+  qaBox.appendChild(el);
+});
+window.toggleQAAnswer=function(i,btn){
+  const a=document.getElementById('qa'+i);
+  const show=!a.classList.contains('show');
+  a.classList.toggle('show',show);
+  btn.innerText=show?'🙈 Hide Answer':'💡 Show Answer';
+  playSound('click');
+  if(show) speakText(a.innerText);
+};
+let reading=false;
+document.getElementById('readAllBtn').onclick=function(){
+  unlockAudio();
+  if(reading){ window.speechSynthesis.cancel(); reading=false; this.innerText='🔊 Read All / Stop'; return; }
+  reading=true; this.innerText='⏹ Stop Reading';
+  let i=0;
+  function next(){
+    if(i>=lines.length||!reading){ reading=false; document.getElementById('readAllBtn').innerText='🔊 Read All / Stop'; return; }
+    speakText(lines[i],()=>{ i++; next(); });
+  }
+  next();
+};
+}
 
 function renderLearn(body,lessonId){const vocab=VOCAB_BY_LESSON[lessonId]||[];body.innerHTML=`<div class="cards-grid" id="learnGrid"></div>`;const grid=document.getElementById('learnGrid');vocab.forEach(item=>{const card=document.createElement('div');card.className='word-card';card.onclick=()=>{card.classList.add('playing');speakText(item.word);playSound('click');setTimeout(()=>card.classList.remove('playing'),1200)};card.innerHTML=`<div class="card-emoji">${item.emoji}</div><div class="word-eng">${item.word}</div><div class="word-meaning ml">${item.meaning}</div><button class="replay-btn">🔊 Listen</button>`;grid.appendChild(card)})}
 
@@ -356,14 +581,41 @@ else{body.innerHTML=`<div class="activity-heading">📝 Poem Activities – Ants
 function renderQuiz(body,lessonId){const quiz=QUIZ_BY_LESSON[lessonId]||[];state.quizSubmitted=false;body.innerHTML=`<div id="quizScoreBox" style="display:none" class="quiz-score-box"></div><div id="quizContainer"></div><div style="text-align:center"><button class="submit-quiz-btn" onclick="submitQuiz('${lessonId}')">✅ Submit Answers</button></div>`;const c=document.getElementById('quizContainer');quiz.forEach((item,qi)=>{const qd=document.createElement('div');qd.className='quiz-q';qd.innerHTML=`<div class="qtext">${qi+1}. ${item.q}</div><div class="quiz-opts" id="qopts${qi}"></div>`;c.appendChild(qd);const od=qd.querySelector('#qopts'+qi);item.opts.forEach((opt,oi)=>{const b=document.createElement('div');b.className='quiz-opt';b.innerText=opt;b.dataset.qi=qi;b.dataset.oi=oi;b.onclick=()=>{if(state.quizSubmitted)return;document.querySelectorAll(`#qopts${qi} .quiz-opt`).forEach(e=>e.classList.remove('picked'));b.classList.add('picked');playSound('click')};od.appendChild(b)})})}
 function submitQuiz(lessonId){if(state.quizSubmitted)return;state.quizSubmitted=true;const quiz=QUIZ_BY_LESSON[lessonId]||[];let score=0;quiz.forEach((item,qi)=>{const opts=document.querySelectorAll(`#qopts${qi} .quiz-opt`);const picked=document.querySelector(`#qopts${qi} .picked`);if(picked&&parseInt(picked.dataset.oi)===item.ans)score++;opts.forEach(o=>{if(parseInt(o.dataset.oi)===item.ans)o.classList.add('correct-ans');else if(o.classList.contains('picked'))o.classList.add('wrong-ans')})});state.score+=score*10;state.stars+=(score>=Math.ceil(quiz.length*.8)?2:1);updateStatsUI();const box=document.getElementById('quizScoreBox');box.style.display='block';box.innerHTML=`Your Score: ${score} / ${quiz.length}  ${score>=Math.ceil(quiz.length*.8)?'Excellent!':score>=Math.ceil(quiz.length*.5)?'Good job!':'Keep practicing!'}`;playSound(score>=Math.ceil(quiz.length*.8)?'fanfare':'correct')}
 
-function renderVocab(body,lessonId){const vocab=VOCAB_BY_LESSON[lessonId]||[];body.innerHTML=`<table class="vocab-table"><thead><tr><th>Word</th><th>Meaning (മലയാളം)</th></tr></thead><tbody>${vocab.map(v=>`<tr><td><span class="vocab-emoji">${v.emoji}</span> <b>${v.word}</b></td><td class="ml">${v.meaning}</td></tr>`).join('')}</tbody></table>`}
+function renderVocab(body,lessonId){
+  const vocab=VOCAB_BY_LESSON[lessonId]||[];
+  body.innerHTML=`<p style="text-align:center;margin-bottom:12px;color:#546E7A;font-size:.95rem">Tap a word to hear it in English 🔊</p>
+  <table class="vocab-table"><thead><tr><th>Word</th><th>Meaning (മലയാളം)</th></tr></thead>
+  <tbody>${vocab.map(v=>`<tr style="cursor:pointer" onclick="speakText('${v.word}');playSound('click')">
+    <td><span class="vocab-emoji">${v.emoji}</span> <b>${v.word}</b> <span style="font-size:.85rem;color:#1976D2">🔊</span></td>
+    <td class="ml">${v.meaning}</td></tr>`).join('')}
+  </tbody></table>`;
+}
 
 function renderWordFun(body,lessonId){if(lessonId==='ants'){body.innerHTML=`<div class="activity-heading">🔤 Word Hunt</div><div class="activity-block"><div class="activity-sub">Look at the word <b>TOGETHER</b>. Find as many words from this word (e.g. go). Write 5 words:</div>
 <textarea class="diary-area" placeholder="1. go&#10;2. ..."></textarea>
 <button class="reveal-model-btn" onclick="revealModel('huntModel',this)">💡 Show Answers</button><div class="model-answer-box" id="huntModel">1. go<br>2. to<br>3. get<br>4. her<br>5. there<br>(Also: he, the, got)</div></div>`}
 else{body.innerHTML=`<div class="activity-heading">🔤 Word Fun</div><p>Try the Word Hunt activity in the <b>Ants</b> lesson!</p>`}}
 
-function launchGame(gnum){const lessonId=state.currentLesson;const vocab=VOCAB_BY_LESSON[lessonId]||[];if(vocab.length<2&&gnum!==7&&gnum!==8&&gnum!==9&&gnum!==10){alert('Game not available for this lesson.');return}state.activeGame=gnum;document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById('game'+gnum+'Screen').classList.add('active');if(gnum===1)initGame1(vocab);if(gnum===2)initGame2(vocab);if(gnum===3)initGame3(vocab);if(gnum===4)initGame4(vocab);if(gnum===5)initGame5(vocab);if(gnum===6)initGame6(vocab);if(gnum===7)initGame7(lessonId);if(gnum===8)initGame8(lessonId);if(gnum===9)initGame9(lessonId);if(gnum===10)initGame10(lessonId)}
+function launchGame(gnum){
+  unlockAudio();
+  playSound('click');
+  const lessonId=state.currentLesson;
+  const vocab=VOCAB_BY_LESSON[lessonId]||[];
+  if(vocab.length<2&&gnum!==7&&gnum!==8&&gnum!==9&&gnum!==10){alert('Game not available for this lesson.');return}
+  state.activeGame=gnum;
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('game'+gnum+'Screen').classList.add('active');
+  if(gnum===1)initGame1(vocab);
+  if(gnum===2)initGame2(vocab);
+  if(gnum===3)initGame3(vocab);
+  if(gnum===4)initGame4(vocab);
+  if(gnum===5)initGame5(vocab);
+  if(gnum===6)initGame6(vocab);
+  if(gnum===7)initGame7(lessonId);
+  if(gnum===8)initGame8(lessonId);
+  if(gnum===9)initGame9(lessonId);
+  if(gnum===10)initGame10(lessonId);
+}
 
 function getRnd(arr,count){const shuffled=[...arr].sort(()=>.5-Math.random());return shuffled.slice(0,count)}
 
@@ -439,7 +691,24 @@ function downloadUnitQPasPDF(){
 
 function renderProgress(){const c=document.getElementById('progressContainer');let h=`<div class="progress-big-bar"><div class="progress-big-fill" style="width:${Math.min(100,state.score/2.5)}%">${Math.min(100,state.score/2.5).toFixed(0)}%</div></div>`;h+=`<h3 style="margin-bottom:10px;color:#0277BD;font-family:'Baloo 2',cursive">Overall Score: ${state.score} &nbsp;|&nbsp; Stars: ${state.stars}</h3>`;h+=`<div style="margin-top:20px"><h4 style="margin-bottom:10px;color:#1565C0">Sections Visited:</h4>`;const keys=Object.keys(state.visited);if(keys.length===0)h+='<p>You haven\'t explored any sections yet.</p>';else{keys.forEach(k=>{const [sec,les]=k.split('_');const lName=LESSONS.find(x=>x.id===les)?.title||'';const sName=SECTION_TITLES[sec]||sec;h+=`<div class="progress-row done"><div>${sName}</div><div>✅</div></div>`})}h+='</div>';c.innerHTML=h}
 
-window.onload=function(){updateStatsUI();if('speechSynthesis'in window){window.speechSynthesis.getVoices();window.speechSynthesis.onvoiceschanged=pickVoice}};
+window.onload=function(){
+  updateStatsUI();
+  if('speechSynthesis' in window){
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged=pickVoice;
+    // Some WebViews load voices late
+    setTimeout(pickVoice, 500);
+    setTimeout(pickVoice, 1500);
+  }
+  // Unlock audio on first user interaction (required for apps / mobile browsers)
+  const unlockOnce=function(){
+    unlockAudio();
+    document.removeEventListener('touchstart',unlockOnce,true);
+    document.removeEventListener('click',unlockOnce,true);
+  };
+  document.addEventListener('touchstart',unlockOnce,true);
+  document.addEventListener('click',unlockOnce,true);
+};
 </script>
 </body>
 </html>
